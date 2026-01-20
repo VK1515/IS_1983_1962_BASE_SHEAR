@@ -1,75 +1,183 @@
-
 import streamlit as st
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
+import pandas as pd
+import math
+import matplotlib.pyplot as plt
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, Image, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-import tempfile
+from openpyxl import load_workbook
+from openpyxl.chart import LineChart, Reference
 
-ah_table = {
-    "0":   {"Hard": 0.00, "Average": 0.00, "Soft": 0.00},
-    "I":   {"Hard": 0.01, "Average": 0.01, "Soft": 0.02},
-    "II":  {"Hard": 0.02, "Average": 0.03, "Soft": 0.04},
-    "III": {"Hard": 0.04, "Average": 0.05, "Soft": 0.06},
-    "IV":  {"Hard": 0.05, "Average": 0.06, "Soft": 0.08},
-    "V":   {"Hard": 0.06, "Average": 0.08, "Soft": 0.10},
-    "VI":  {"Hard": 0.08, "Average": 0.10, "Soft": 0.12}
+# ==================================================
+# PAGE CONFIG
+# ==================================================
+st.set_page_config(
+    page_title="IS 1893:2025 Seismic Force Calculator",
+    layout="wide"
+)
+
+st.title("IS 1893:2025 – Seismic Force Calculator")
+st.caption(
+    "Equivalent Static Method | Direction-wise | Multi-Zone Capability\n\n"
+    "⚠️ For educational use only\n"
+    "Created by: Vrushali Kamalakar"
+)
+
+# ==================================================
+# Z TABLE
+# ==================================================
+Z_TABLE = {
+    "VI": {75:0.300,175:0.375,275:0.450,475:0.500,975:0.600,1275:0.625,2475:0.750,4975:0.940,9975:1.125},
+    "V":  {75:0.200,175:0.250,275:0.300,475:0.333,975:0.400,1275:0.4167,2475:0.500,4975:0.625,9975:0.750},
+    "IV": {75:0.140,175:0.175,275:0.210,475:0.233,975:0.280,1275:0.2917,2475:0.350,4975:0.440,9975:0.525},
+    "III":{75:0.0625,175:0.085,275:0.100,475:0.125,975:0.167,1275:0.1875,2475:0.250,4975:0.333,9975:0.450},
+    "II": {75:0.0375,175:0.050,275:0.060,475:0.075,975:0.100,1275:0.1125,2475:0.150,4975:0.200,9975:0.270}
 }
 
-st.title("IS 1893 : 1962 Seismic Force Calculator")
-st.markdown("**Design Equation:**  \nF = ah × W")
+# ==================================================
+# SESSION STATE
+# ==================================================
+if "base_shear" not in st.session_state:
+    st.session_state.base_shear = {}
+if "storey_df" not in st.session_state:
+    st.session_state.storey_df = None
+if "multi_zone_df" not in st.session_state:
+    st.session_state.multi_zone_df = None
 
-zone = st.selectbox("Select Seismic Zone", ["0", "I", "II", "III", "IV", "V", "VI"])
-soil = st.selectbox("Select Soil Type", ["Hard", "Average", "Soft"])
-W = st.number_input("Enter Seismic Weight W", min_value=0.0, value=0.0, step=1.0)
+# ==================================================
+# FUNCTIONS
+# ==================================================
+def A_NH(T, site):
+    if site == "A/B":
+        return 2.5 if T <= 0.4 else (1/T if T <= 6 else 6/T**2)
+    if site == "C":
+        return 2.5 if T <= 0.6 else (1.5/T if T <= 6 else 9/T**2)
+    return 2.5 if T <= 0.8 else (2/T if T <= 6 else 12/T**2)
 
-ah = ah_table[zone][soil]
-st.info(f"Horizontal Seismic Coefficient (ah) = {ah}")
+def delta_v(T, site):
+    return 0.67 if T > 0.10 else {"A/B":0.80,"C":0.82,"D":0.85}[site]
 
-if st.button("Compute Seismic Force"):
-    F = ah * W
-    st.success(f"Seismic Force, F = ah × W = {round(F, 4)}")
+def gamma_v(T, site):
+    return {"A/B":1/T,"C":1.5/T,"D":2.0/T}[site]
 
-    def generate_pdf():
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        doc = SimpleDocTemplate(
-            temp_file.name,
-            pagesize=A4,
-            rightMargin=25 * mm,
-            leftMargin=25 * mm,
-            topMargin=25 * mm,
-            bottomMargin=25 * mm
-        )
+# ==================================================
+# TABS
+# ==================================================
+tab1, tab2, tab3 = st.tabs([
+    "① Base Shear",
+    "② Storey-wise Distribution",
+    "③ Multi-Zone Study"
+])
 
-        styles = getSampleStyleSheet()
-        elements = []
+# ==================================================
+# TAB 1 – BASE SHEAR
+# ==================================================
+with tab1:
+    zone = st.selectbox("Earthquake Zone", list(Z_TABLE.keys()))
+    TR = st.selectbox("Return Period (years)", list(Z_TABLE[zone].keys()))
+    Z = Z_TABLE[zone][TR]
 
-        elements.append(Paragraph("<b>IS 1893 : 1962 Seismic Force Calculation Report</b>", styles["Title"]))
-        elements.append(Spacer(1, 12))
+    I = st.number_input("Importance Factor", value=1.0)
+    R = st.number_input("Response Reduction Factor", value=5.0)
+    site = st.selectbox("Site Class", ["A/B","C","D"])
+    W = st.number_input("Total Seismic Weight (kN)", value=10000.0)
+    H = st.number_input("Total Height (m)", value=15.0)
+    dx = st.number_input("Plan Dimension X (m)", value=10.0)
+    dy = st.number_input("Plan Dimension Y (m)", value=15.0)
+    TV = st.number_input("Vertical Period Tv (s)", value=0.4)
 
-        table_data = [
-            ["Parameter", "Value"],
-            ["Seismic Zone", zone],
-            ["Soil Type", soil],
-            ["Seismic Weight (W)", str(W)],
-            ["Horizontal Seismic Coefficient (ah)", str(ah)]
-        ]
+    if st.button("Compute Base Shear"):
+        Tx = 0.09 * H / math.sqrt(dx)
+        Ty = 0.09 * H / math.sqrt(dy)
 
-        elements.append(Table(table_data, colWidths=[70 * mm, 80 * mm]))
-        elements.append(Spacer(1, 12))
-        elements.append(Paragraph("F = ah × W", styles["Normal"]))
-        elements.append(Spacer(1, 12))
-        elements.append(Paragraph(f"Result: F = {round(F, 4)}", styles["Normal"]))
+        Vx = (Z * I * A_NH(Tx, site) / R) * W
+        Vy = (Z * I * A_NH(Ty, site) / R) * W
+        Vv = Z * I * delta_v(TV, site) * gamma_v(TV, site) * W
 
-        doc.build(elements)
-        return temp_file.name
+        st.session_state.base_shear = {
+            "Zone":zone,"TR":TR,"Z":Z,"I":I,"R":R,"Site":site,
+            "W":W,"Tx":Tx,"Ty":Ty,"Vx":Vx,"Vy":Vy,"Vv":Vv
+        }
 
-    pdf_path = generate_pdf()
+        st.success("Base shear computed")
 
-    with open(pdf_path, "rb") as pdf_file:
-        st.download_button(
-            "Download PDF Report",
-            pdf_file,
-            file_name="IS_1893_1962_Seismic_Force_Report.pdf",
-            mime="application/pdf"
-        )
+        st.table(pd.DataFrame({
+            "Parameter":["Tx (s)","Ty (s)","Vx (kN)","Vy (kN)","Vv (kN)"],
+            "Value":[Tx,Ty,Vx,Vy,Vv]
+        }).round(3))
+
+# ==================================================
+# TAB 2 – STOREY DISTRIBUTION + STEP PLOT + PDF
+# ==================================================
+with tab2:
+    if not st.session_state.base_shear:
+        st.warning("Compute base shear in Tab ① first.")
+    else:
+        bs = st.session_state.base_shear
+        N = st.number_input("Number of Storeys", min_value=1, value=5, step=1)
+
+        rows = []
+        for i in range(1, N+1):
+            Wi = st.number_input(f"W{i} (kN)", value=bs["W"]/N, key=f"W{i}")
+            Hi = st.number_input(f"H{i} (m)", value=3*i, key=f"H{i}")
+            rows.append([i, Wi, Hi])
+
+        df = pd.DataFrame(rows, columns=["Storey","Wi","Hi"])
+        df["WiHi2"] = df["Wi"] * df["Hi"]**2
+
+        df["QX"] = df["WiHi2"]/df["WiHi2"].sum()*bs["Vx"]
+        df["QY"] = df["WiHi2"]/df["WiHi2"].sum()*bs["Vy"]
+        df["QV"] = df["Wi"]/df["Wi"].sum()*bs["Vv"]
+
+        df["VX"] = df["QX"][::-1].cumsum()[::-1]
+        df["VY"] = df["QY"][::-1].cumsum()[::-1]
+        df["VV"] = df["QV"][::-1].cumsum()[::-1]
+
+        st.session_state.storey_df = df
+        st.dataframe(df.round(3), use_container_width=True)
+
+        # STEP PLOT
+        fig, ax = plt.subplots(figsize=(6,8))
+        ax.step(df["VX"], df["Hi"], where="post", label="X")
+        ax.step(df["VY"], df["Hi"], where="post", label="Y")
+        ax.step(df["VV"], df["Hi"], where="post", linestyle="--", label="Vertical")
+        ax.set_xlabel("Storey Shear (kN)")
+        ax.set_ylabel("Height (m)")
+        ax.set_title("Storey-wise Shear (Step Plot)")
+        ax.legend()
+        ax.grid(True)
+        st.pyplot(fig)
+        fig.savefig("storey_shear_step.png", dpi=300, bbox_inches="tight")
+
+        # PDF EXPORT
+        if st.button("Export PDF (Base + Storey Results)"):
+            doc = SimpleDocTemplate("IS1893_Storey_Results.pdf")
+            styles = getSampleStyleSheet()
+            content = [
+                Paragraph("IS 1893:2025 – Seismic Analysis Output", styles["Title"]),
+                Spacer(1,12),
+                Paragraph("Base Shear Results", styles["Heading2"]),
+                Table([[k,v] for k,v in bs.items()]),
+                Spacer(1,12),
+                Paragraph("Storey-wise Forces", styles["Heading2"]),
+                Table([df.columns.tolist()]+df.round(3).values.tolist()),
+                Spacer(1,12),
+                Image("storey_shear_step.png", width=400, height=600)
+            ]
+            doc.build(content)
+            st.success("PDF generated: IS1893_Storey_Results.pdf")
+
+# ==================================================
+# TAB 3 – MULTI-ZONE STUDY
+# ==================================================
+with tab3:
+    zones = st.multiselect("Zones", list(Z_TABLE.keys()), default=["II","III","IV"])
+    TR = st.selectbox("Return Period", [75,175,275,475,975])
+    if st.button("Compute Multi-Zone"):
+        rows=[]
+        for z in zones:
+            Z = Z_TABLE[z][TR]
+            Vx = Z * A_NH(0.5,"A/B") * 10000 / 5
+            Vy = Z * A_NH(0.7,"A/B") * 10000 / 5
+            rows.append([z,Z,Vx,Vy])
+        dfz = pd.DataFrame(rows, columns=["Zone","Z","Vx","Vy"])
+        st.dataframe(dfz.round(3))
