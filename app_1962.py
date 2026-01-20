@@ -21,7 +21,7 @@ st.caption(
 )
 
 # ==================================================
-# FULL Z TABLE – IS 1893:2025
+# Z TABLE – COMPLETE (IS 1893:2025)
 # ==================================================
 Z_TABLE = {
     "VI": {75:0.300,175:0.375,275:0.450,475:0.500,975:0.600,1275:0.625,2475:0.750,4975:0.940,9975:1.125},
@@ -36,6 +36,8 @@ Z_TABLE = {
 # ==================================================
 if "base_shear" not in st.session_state:
     st.session_state.base_shear = {}
+if "storey_df" not in st.session_state:
+    st.session_state.storey_df = None
 
 # ==================================================
 # FUNCTIONS (IS 1893:2025)
@@ -56,20 +58,19 @@ def gamma_v(T, site):
 # ==================================================
 # TABS
 # ==================================================
-tab1, tab2, tab3 = st.tabs([
-    "① Base Shear",
-    "② Storey-wise Distribution & PDF",
-    "③ Multi-Zone Study"
+tab1, tab2 = st.tabs([
+    "① Base Shear Calculation",
+    "② Storey-wise Distribution & PDF"
 ])
 
 # ==================================================
 # TAB 1 – BASE SHEAR
 # ==================================================
 with tab1:
-    st.subheader("Base Shear Calculation")
+    st.subheader("Base Shear Calculation (IS 1893:2025)")
 
     zone = st.selectbox("Earthquake Zone", list(Z_TABLE.keys()))
-    TR = st.selectbox("Return Period (years)", sorted(Z_TABLE[zone].keys()))
+    TR = st.selectbox("Return Period TR (years)", list(Z_TABLE[zone].keys()))
     Z = Z_TABLE[zone][TR]
 
     I = st.number_input("Importance Factor (I)", value=1.0)
@@ -103,7 +104,7 @@ with tab1:
             "Vv (kN)": Vv
         }
 
-        st.success("Base shear computed")
+        st.success("Base shear computed successfully")
 
         st.table(
             pd.DataFrame(
@@ -116,48 +117,58 @@ with tab1:
 # TAB 2 – STOREY DISTRIBUTION + STEP PLOT + PDF
 # ==================================================
 with tab2:
-    st.subheader("Storey-wise Force Distribution")
+    st.subheader("Storey-wise Seismic Force Distribution")
 
     if not st.session_state.base_shear:
-        st.warning("Compute base shear in Tab ① first.")
+        st.warning("Please compute base shear in Tab ① first.")
     else:
         bs = st.session_state.base_shear
+
         N = st.number_input("Number of Storeys", min_value=1, value=5, step=1)
 
         rows = []
-        for i in range(1, N + 1):
-            Wi = st.number_input(f"W{i} (kN)", value=bs["Vx (kN)"]/N, key=f"W{i}")
-            Hi = st.number_input(f"H{i} (m)", value=3.0*i, key=f"H{i}")
+        for i in range(1, N+1):
+            Wi = st.number_input(
+                f"Seismic Weight W{i} (kN)",
+                value=bs["Vx (kN)"]/N,
+                key=f"Wi_{i}"
+            )
+            Hi = st.number_input(
+                f"Height to Storey {i} (m)",
+                value=3.0*i,
+                key=f"Hi_{i}"
+            )
             rows.append([i, Wi, Hi])
 
         df = pd.DataFrame(rows, columns=["Storey","Wi (kN)","Hi (m)"])
         df["WiHi²"] = df["Wi (kN)"] * df["Hi (m)"]**2
 
-        df["QX"] = df["WiHi²"]/df["WiHi²"].sum() * bs["Vx (kN)"]
-        df["QY"] = df["WiHi²"]/df["WiHi²"].sum() * bs["Vy (kN)"]
-        df["QV"] = df["Wi (kN)"]/df["Wi (kN)"].sum() * bs["Vv (kN)"]
+        df["QX"] = df["WiHi²"]/df["WiHi²"].sum()*bs["Vx (kN)"]
+        df["QY"] = df["WiHi²"]/df["WiHi²"].sum()*bs["Vy (kN)"]
+        df["QV"] = df["Wi (kN)"]/df["Wi (kN)"].sum()*bs["Vv (kN)"]
 
         df["VX"] = df["QX"][::-1].cumsum()[::-1]
         df["VY"] = df["QY"][::-1].cumsum()[::-1]
         df["VV"] = df["QV"][::-1].cumsum()[::-1]
 
+        st.session_state.storey_df = df
         st.dataframe(df.round(3), use_container_width=True)
 
         # ---------- STEP PLOT WITH VALUES ----------
         fig, ax = plt.subplots(figsize=(6,8))
+
         ax.step(df["VX"], df["Hi (m)"], where="post", label="X-direction")
         ax.step(df["VY"], df["Hi (m)"], where="post", label="Y-direction")
         ax.step(df["VV"], df["Hi (m)"], where="post", linestyle="--", label="Vertical")
 
+        # Value annotations (shifted to avoid overlap)
         for i in range(len(df)):
-            h = df.loc[i, "Hi (m)"]
-            ax.text(df.loc[i,"VX"], h, f'{df.loc[i,"VX"]:.1f}', fontsize=8, va="bottom")
-            ax.text(df.loc[i,"VY"], h, f'{df.loc[i,"VY"]:.1f}', fontsize=8, va="top")
-            ax.text(df.loc[i,"VV"], h, f'{df.loc[i,"VV"]:.1f}', fontsize=8, va="center")
+            ax.text(df["VX"][i]*1.01, df["Hi (m)"][i], f'{df["VX"][i]:.0f}', fontsize=8)
+            ax.text(df["VY"][i]*0.97, df["Hi (m)"][i], f'{df["VY"][i]:.0f}', fontsize=8)
 
         ax.set_xlabel("Storey Shear (kN)")
         ax.set_ylabel("Height (m)")
-        ax.set_title("Storey-wise Shear – Step Plot")
+        ax.set_title("Storey-wise Shear Distribution (Step Plot)")
         ax.legend()
         ax.grid(True)
 
@@ -183,26 +194,6 @@ with tab2:
 
             doc.build(content)
             st.success("PDF generated: IS1893_Storey_Results.pdf")
-
-# ==================================================
-# TAB 3 – MULTI-ZONE STUDY
-# ==================================================
-with tab3:
-    st.subheader("Multi-Zone Base Shear Comparison")
-
-    zones = st.multiselect("Zones", list(Z_TABLE.keys()), default=["II","III","IV"])
-    TR = st.selectbox("Return Period (years)", [75,175,275,475,975,1275,2475,4975,9975])
-
-    if st.button("Compute Multi-Zone"):
-        rows = []
-        for z in zones:
-            Z = Z_TABLE[z][TR]
-            Vx = Z * A_NH(0.5,"A/B") * 10000 / 5
-            Vy = Z * A_NH(0.7,"A/B") * 10000 / 5
-            rows.append([z, Z, Vx, Vy])
-
-        dfz = pd.DataFrame(rows, columns=["Zone","Z","Vx (kN)","Vy (kN)"])
-        st.dataframe(dfz.round(3), use_container_width=True)
 
 # ==================================================
 # FOOTER
