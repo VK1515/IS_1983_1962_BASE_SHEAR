@@ -135,18 +135,57 @@ with tab2:
         st.session_state.storey_df = df
         st.dataframe(df.round(3), use_container_width=True)
 
-        # STEP PLOT
-        fig, ax = plt.subplots(figsize=(6,8))
-        ax.step(df["VX"], df["Hi"], where="post", label="X")
-        ax.step(df["VY"], df["Hi"], where="post", label="Y")
-        ax.step(df["VV"], df["Hi"], where="post", linestyle="--", label="Vertical")
-        ax.set_xlabel("Storey Shear (kN)")
-        ax.set_ylabel("Height (m)")
-        ax.set_title("Storey-wise Shear (Step Plot)")
-        ax.legend()
-        ax.grid(True)
-        st.pyplot(fig)
-        fig.savefig("storey_shear_step.png", dpi=300, bbox_inches="tight")
+        # ---------- COMBINED STEP PLOT WITH VALUES ----------
+fig, ax = plt.subplots(figsize=(6, 8))
+
+ax.step(df["VX"], df["Hi (m)"], where="post", label="X-direction")
+ax.step(df["VY"], df["Hi (m)"], where="post", label="Y-direction")
+ax.step(df["VV"], df["Hi (m)"], where="post", linestyle="--", label="Vertical")
+
+# Annotate values at each storey
+for i in range(len(df)):
+    h = df.loc[i, "Hi (m)"]
+
+    ax.text(
+        df.loc[i, "VX"],
+        h,
+        f'{df.loc[i,"VX"]:.2f}',
+        fontsize=8,
+        va="bottom",
+        ha="left"
+    )
+
+    ax.text(
+        df.loc[i, "VY"],
+        h,
+        f'{df.loc[i,"VY"]:.2f}',
+        fontsize=8,
+        va="bottom",
+        ha="left"
+    )
+
+    ax.text(
+        df.loc[i, "VV"],
+        h,
+        f'{df.loc[i,"VV"]:.2f}',
+        fontsize=8,
+        va="top",
+        ha="right"
+    )
+
+ax.set_xlabel("Storey Shear (kN)")
+ax.set_ylabel("Height (m)")
+ax.set_title("Storey-wise Shear – Step Plot (with Values)")
+ax.legend()
+ax.grid(True)
+
+st.pyplot(fig)
+
+fig.savefig(
+    "storey_shear_step.png",
+    dpi=300,
+    bbox_inches="tight"
+)
 
         # PDF EXPORT
         if st.button("Export PDF (Base + Storey Results)"):
