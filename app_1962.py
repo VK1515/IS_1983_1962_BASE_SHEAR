@@ -19,14 +19,34 @@ st.caption(
 )
 
 # ==================================================
-# Z TABLE (IS 1893:2025 – trimmed, stable)
+# FULL Z TABLE (IS 1893:2025)
 # ==================================================
 Z_TABLE = {
-    "VI": {75:0.300, 175:0.375, 275:0.450, 475:0.500},
-    "V":  {75:0.200, 175:0.250, 275:0.300, 475:0.333},
-    "IV": {75:0.140, 175:0.175, 275:0.210, 475:0.233},
-    "III":{75:0.0625,175:0.085,275:0.100,475:0.125},
-    "II": {75:0.0375,175:0.050,275:0.060,475:0.075}
+    "VI": {
+        75:0.300, 175:0.375, 275:0.450, 475:0.500,
+        975:0.600, 1275:0.625, 2475:0.750,
+        4975:0.940, 9975:1.125
+    },
+    "V": {
+        75:0.200, 175:0.250, 275:0.300, 475:0.333,
+        975:0.400, 1275:0.4167, 2475:0.500,
+        4975:0.625, 9975:0.750
+    },
+    "IV": {
+        75:0.140, 175:0.175, 275:0.210, 475:0.233,
+        975:0.280, 1275:0.2917, 2475:0.350,
+        4975:0.440, 9975:0.525
+    },
+    "III": {
+        75:0.0625, 175:0.085, 275:0.100, 475:0.125,
+        975:0.167, 1275:0.1875, 2475:0.250,
+        4975:0.333, 9975:0.450
+    },
+    "II": {
+        75:0.0375, 175:0.050, 275:0.060, 475:0.075,
+        975:0.100, 1275:0.1125, 2475:0.150,
+        4975:0.200, 9975:0.270
+    }
 }
 
 # ==================================================
@@ -34,8 +54,6 @@ Z_TABLE = {
 # ==================================================
 if "base_shear" not in st.session_state:
     st.session_state.base_shear = {}
-if "storey_df" not in st.session_state:
-    st.session_state.storey_df = None
 
 # ==================================================
 # IS 1893 FUNCTIONS
@@ -54,13 +72,13 @@ def gamma_v(T, site):
     return {"A/B":1/T,"C":1.5/T,"D":2/T}[site]
 
 # ==================================================
-# STEP-PLOT ANNOTATION FUNCTION (KEY FIX)
+# STEP-PLOT VALUE ANNOTATION (NO OVERLAP)
 # ==================================================
-def annotate_step_plot(ax, x_vals, y_vals, label, color):
+def annotate_step_plot(ax, x_vals, y_vals, color, offset_factor):
     x_max = max(x_vals)
     for x, y in zip(x_vals, y_vals):
         ax.text(
-            x + 0.03 * x_max,
+            x + offset_factor * x_max,
             y,
             f"{x:.1f}",
             va="center",
@@ -70,12 +88,11 @@ def annotate_step_plot(ax, x_vals, y_vals, label, color):
         )
 
 # ==================================================
-# TABS
+# TABS (ONLY 2)
 # ==================================================
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2 = st.tabs([
     "① Base Shear",
-    "② Storey-wise Distribution",
-    "③ About"
+    "② Storey-wise Distribution"
 ])
 
 # ==================================================
@@ -85,7 +102,10 @@ with tab1:
     st.subheader("Base Shear Calculation")
 
     zone = st.selectbox("Earthquake Zone", list(Z_TABLE.keys()))
-    TR = st.selectbox("Return Period (years)", list(Z_TABLE[zone].keys()))
+    TR = st.selectbox(
+        "Return Period (years)",
+        list(Z_TABLE[zone].keys())
+    )
     Z = Z_TABLE[zone][TR]
 
     I = st.number_input("Importance Factor (I)", value=1.0)
@@ -107,6 +127,11 @@ with tab1:
         Vv = Z * I * delta_v(TV, site) * gamma_v(TV, site) * W
 
         st.session_state.base_shear = {
+            "Zone": zone,
+            "Return Period (yr)": TR,
+            "Z": Z,
+            "I": I,
+            "R": R,
             "Tx (s)": Tx,
             "Ty (s)": Ty,
             "Vx (kN)": Vx,
@@ -128,7 +153,7 @@ with tab1:
             pd.DataFrame(
                 st.session_state.base_shear.items(),
                 columns=["Parameter","Value"]
-            ).round(3)
+            ).round(4)
         )
 
 # ==================================================
@@ -139,6 +164,11 @@ with tab2:
         st.warning("Compute base shear in Tab ① first.")
     else:
         bs = st.session_state.base_shear
+
+        show_labels = st.checkbox(
+            "Show value labels on storey shear plot",
+            value=False
+        )
 
         N = st.number_input("Number of Storeys", min_value=1, value=5)
 
@@ -165,16 +195,23 @@ with tab2:
 
         st.dataframe(df.round(3), use_container_width=True)
 
-        # -------- STEP PLOT WITH VALUES --------
+        # ---------- STEP PLOT ----------
         fig, ax = plt.subplots(figsize=(6,8))
 
         ax.step(df["VX"], df["Hi"], where="post", label="X", color="tab:blue")
         ax.step(df["VY"], df["Hi"], where="post", label="Y", color="tab:green")
-        ax.step(df["VV"], df["Hi"], where="post", label="Vertical", linestyle="--", color="black")
+        ax.step(
+            df["VV"], df["Hi"],
+            where="post",
+            linestyle="--",
+            label="Vertical",
+            color="black"
+        )
 
-        annotate_step_plot(ax, df["VX"], df["Hi"], "X", "tab:blue")
-        annotate_step_plot(ax, df["VY"], df["Hi"], "Y", "tab:green")
-        annotate_step_plot(ax, df["VV"], df["Hi"], "V", "black")
+        if show_labels:
+            annotate_step_plot(ax, df["VX"], df["Hi"], "tab:blue", 0.02)
+            annotate_step_plot(ax, df["VY"], df["Hi"], "tab:green", 0.06)
+            annotate_step_plot(ax, df["VV"], df["Hi"], "black", 0.10)
 
         ax.set_xlabel("Storey Shear (kN)")
         ax.set_ylabel("Height (m)")
@@ -185,11 +222,11 @@ with tab2:
         st.pyplot(fig)
 
 # ==================================================
-# TAB 3 – ABOUT
+# FOOTER
 # ==================================================
-with tab3:
-    st.info(
-        "This application demonstrates IS 1893:2025 Equivalent Static Method.\n\n"
-        "For educational use only.\n\n"
-        "Created by: Vrushali Kamalakar"
-    )
+st.markdown("---")
+st.info(
+    "📘 For educational use only.\n"
+    "Independent verification is mandatory before professional application.\n\n"
+    "Created by: Vrushali Kamalakar"
+)
