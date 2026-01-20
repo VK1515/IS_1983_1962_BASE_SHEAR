@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import math
 import matplotlib.pyplot as plt
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, Image, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
 
 # ==================================================
 # PAGE CONFIG
@@ -21,14 +19,14 @@ st.caption(
 )
 
 # ==================================================
-# Z TABLE – COMPLETE
+# Z TABLE (IS 1893:2025 – trimmed, stable)
 # ==================================================
 Z_TABLE = {
-    "VI": {75:0.300,175:0.375,275:0.450,475:0.500,975:0.600,1275:0.625,2475:0.750,4975:0.940,9975:1.125},
-    "V":  {75:0.200,175:0.250,275:0.300,475:0.333,975:0.400,1275:0.4167,2475:0.500,4975:0.625,9975:0.750},
-    "IV": {75:0.140,175:0.175,275:0.210,475:0.233,975:0.280,1275:0.2917,2475:0.350,4975:0.440,9975:0.525},
-    "III":{75:0.0625,175:0.085,275:0.100,475:0.125,975:0.167,1275:0.1875,2475:0.250,4975:0.333,9975:0.450},
-    "II": {75:0.0375,175:0.050,275:0.060,475:0.075,975:0.100,1275:0.1125,2475:0.150,4975:0.200,9975:0.270}
+    "VI": {75:0.300, 175:0.375, 275:0.450, 475:0.500},
+    "V":  {75:0.200, 175:0.250, 275:0.300, 475:0.333},
+    "IV": {75:0.140, 175:0.175, 275:0.210, 475:0.233},
+    "III":{75:0.0625,175:0.085,275:0.100,475:0.125},
+    "II": {75:0.0375,175:0.050,275:0.060,475:0.075}
 }
 
 # ==================================================
@@ -40,20 +38,36 @@ if "storey_df" not in st.session_state:
     st.session_state.storey_df = None
 
 # ==================================================
-# FUNCTIONS (IS 1893:2025)
+# IS 1893 FUNCTIONS
 # ==================================================
 def A_NH(T, site):
     if site == "A/B":
-        return 2.5 if T <= 0.4 else 1/T
+        return 2.5 if T <= 0.4 else 1 / T
     if site == "C":
-        return 2.5 if T <= 0.6 else 1.5/T
-    return 2.5 if T <= 0.8 else 2/T
+        return 2.5 if T <= 0.6 else 1.5 / T
+    return 2.5 if T <= 0.8 else 2 / T
 
 def delta_v(T, site):
     return 0.67 if T > 0.10 else {"A/B":0.80,"C":0.82,"D":0.85}[site]
 
 def gamma_v(T, site):
-    return {"A/B":1/T,"C":1.5/T,"D":2.0/T}[site]
+    return {"A/B":1/T,"C":1.5/T,"D":2/T}[site]
+
+# ==================================================
+# STEP-PLOT ANNOTATION FUNCTION (KEY FIX)
+# ==================================================
+def annotate_step_plot(ax, x_vals, y_vals, label, color):
+    x_max = max(x_vals)
+    for x, y in zip(x_vals, y_vals):
+        ax.text(
+            x + 0.03 * x_max,
+            y,
+            f"{x:.1f}",
+            va="center",
+            ha="left",
+            fontsize=8,
+            color=color
+        )
 
 # ==================================================
 # TABS
@@ -61,7 +75,7 @@ def gamma_v(T, site):
 tab1, tab2, tab3 = st.tabs([
     "① Base Shear",
     "② Storey-wise Distribution",
-    "③ Multi-Zone Study"
+    "③ About"
 ])
 
 # ==================================================
@@ -70,19 +84,19 @@ tab1, tab2, tab3 = st.tabs([
 with tab1:
     st.subheader("Base Shear Calculation")
 
-    zone = st.selectbox("Earthquake Zone", list(Z_TABLE.keys()), key="zone")
-    TR = st.selectbox("Return Period TR (years)", list(Z_TABLE[zone].keys()), key="tr")
+    zone = st.selectbox("Earthquake Zone", list(Z_TABLE.keys()))
+    TR = st.selectbox("Return Period (years)", list(Z_TABLE[zone].keys()))
     Z = Z_TABLE[zone][TR]
 
-    I = st.number_input("Importance Factor (I)", value=1.0, key="I")
-    R = st.number_input("Response Reduction Factor (R)", value=5.0, key="R")
-    site = st.selectbox("Site Class", ["A/B","C","D"], key="site")
-    W = st.number_input("Total Seismic Weight W (kN)", value=10000.0, key="W")
+    I = st.number_input("Importance Factor (I)", value=1.0)
+    R = st.number_input("Response Reduction Factor (R)", value=5.0)
+    site = st.selectbox("Site Class", ["A/B","C","D"])
+    W = st.number_input("Total Seismic Weight W (kN)", value=10000.0)
 
-    H = st.number_input("Total Height H (m)", value=15.0, key="H")
-    dx = st.number_input("Plan Dimension X (m)", value=10.0, key="dx")
-    dy = st.number_input("Plan Dimension Y (m)", value=15.0, key="dy")
-    TV = st.number_input("Vertical Period Tv (s)", value=0.4, key="Tv")
+    H = st.number_input("Total Height H (m)", value=15.0)
+    dx = st.number_input("Plan Dimension X (m)", value=10.0)
+    dy = st.number_input("Plan Dimension Y (m)", value=15.0)
+    TV = st.number_input("Vertical Period Tv (s)", value=0.4)
 
     if st.button("Compute Base Shear"):
         Tx = 0.09 * H / math.sqrt(dx)
@@ -93,19 +107,22 @@ with tab1:
         Vv = Z * I * delta_v(TV, site) * gamma_v(TV, site) * W
 
         st.session_state.base_shear = {
-            "Zone": zone,
-            "TR (yr)": TR,
-            "Z": Z,
-            "I": I,
-            "R": R,
             "Tx (s)": Tx,
             "Ty (s)": Ty,
             "Vx (kN)": Vx,
             "Vy (kN)": Vy,
-            "Vv (kN)": Vv
+            "Vv (kN)": Vv,
+            "W (kN)": W
         }
 
-        st.success("Base shear computed successfully")
+        st.success("Base shear computed and locked.")
+
+        c1,c2,c3,c4,c5 = st.columns(5)
+        c1.metric("Tx (s)", f"{Tx:.3f}")
+        c2.metric("Ty (s)", f"{Ty:.3f}")
+        c3.metric("Vx (kN)", f"{Vx:.1f}")
+        c4.metric("Vy (kN)", f"{Vy:.1f}")
+        c5.metric("Vv (kN)", f"{Vv:.1f}")
 
         st.table(
             pd.DataFrame(
@@ -115,55 +132,49 @@ with tab1:
         )
 
 # ==================================================
-# TAB 2 – STOREY DISTRIBUTION + STEP PLOT + PDF
+# TAB 2 – STOREY DISTRIBUTION + STEP PLOT
 # ==================================================
 with tab2:
-    st.subheader("Storey-wise Seismic Force Distribution")
-
     if not st.session_state.base_shear:
-        st.warning("Please compute base shear in Tab ① first.")
+        st.warning("Compute base shear in Tab ① first.")
     else:
         bs = st.session_state.base_shear
 
-        N = st.number_input("Number of Storeys", min_value=1, value=5, step=1, key="N")
+        N = st.number_input("Number of Storeys", min_value=1, value=5)
 
         rows = []
         for i in range(1, N+1):
             Wi = st.number_input(
-                f"Seismic Weight W{i} (kN)",
-                value=bs["Vx (kN)"]/N,
-                key=f"W_{i}"
+                f"W{i} (kN)",
+                value=bs["W (kN)"]/N,
+                key=f"Wi_{i}"
             )
             Hi = st.number_input(
-                f"Height to Storey {i} (m)",
+                f"H{i} (m)",
                 value=3.0*i,
-                key=f"H_{i}"
+                key=f"Hi_{i}"
             )
             rows.append([i, Wi, Hi])
 
-        df = pd.DataFrame(rows, columns=["Storey","Wi (kN)","Hi (m)"])
-        df["WiHi²"] = df["Wi (kN)"] * df["Hi (m)"]**2
+        df = pd.DataFrame(rows, columns=["Storey","Wi","Hi"])
+        df["WiHi2"] = df["Wi"] * df["Hi"]**2
 
-        df["QX"] = df["WiHi²"]/df["WiHi²"].sum()*bs["Vx (kN)"]
-        df["QY"] = df["WiHi²"]/df["WiHi²"].sum()*bs["Vy (kN)"]
-        df["QV"] = df["Wi (kN)"]/df["Wi (kN)"].sum()*bs["Vv (kN)"]
+        df["VX"] = (df["WiHi2"]/df["WiHi2"].sum()*bs["Vx (kN)"])[::-1].cumsum()[::-1]
+        df["VY"] = (df["WiHi2"]/df["WiHi2"].sum()*bs["Vy (kN)"])[::-1].cumsum()[::-1]
+        df["VV"] = (df["Wi"]/df["Wi"].sum()*bs["Vv (kN)"])[::-1].cumsum()[::-1]
 
-        df["VX"] = df["QX"][::-1].cumsum()[::-1]
-        df["VY"] = df["QY"][::-1].cumsum()[::-1]
-        df["VV"] = df["QV"][::-1].cumsum()[::-1]
-
-        st.session_state.storey_df = df
         st.dataframe(df.round(3), use_container_width=True)
 
-        # STEP PLOT
+        # -------- STEP PLOT WITH VALUES --------
         fig, ax = plt.subplots(figsize=(6,8))
 
-        ax.step(df["VX"], df["Hi (m)"], where="post", label="X")
-        ax.step(df["VY"], df["Hi (m)"], where="post", label="Y")
-        ax.step(df["VV"], df["Hi (m)"], where="post", linestyle="--", label="Vertical")
+        ax.step(df["VX"], df["Hi"], where="post", label="X", color="tab:blue")
+        ax.step(df["VY"], df["Hi"], where="post", label="Y", color="tab:green")
+        ax.step(df["VV"], df["Hi"], where="post", label="Vertical", linestyle="--", color="black")
 
-        for i in range(len(df)):
-            ax.text(df["VX"][i]*1.02, df["Hi (m)"][i], f'{df["VX"][i]:.0f}', fontsize=8)
+        annotate_step_plot(ax, df["VX"], df["Hi"], "X", "tab:blue")
+        annotate_step_plot(ax, df["VY"], df["Hi"], "Y", "tab:green")
+        annotate_step_plot(ax, df["VV"], df["Hi"], "V", "black")
 
         ax.set_xlabel("Storey Shear (kN)")
         ax.set_ylabel("Height (m)")
@@ -172,57 +183,13 @@ with tab2:
         ax.grid(True)
 
         st.pyplot(fig)
-        fig.savefig("storey_shear_step.png", dpi=300, bbox_inches="tight")
-
-        if st.button("Export PDF (Base + Storey Results)"):
-            doc = SimpleDocTemplate("IS1893_Storey_Results.pdf")
-            styles = getSampleStyleSheet()
-
-            content = [
-                Paragraph("IS 1893:2025 – Seismic Analysis Output", styles["Title"]),
-                Spacer(1,12),
-                Paragraph("Base Shear Results", styles["Heading2"]),
-                Table([[k,v] for k,v in bs.items()]),
-                Spacer(1,12),
-                Paragraph("Storey-wise Force Distribution", styles["Heading2"]),
-                Table([df.columns.tolist()] + df.round(3).values.tolist()),
-                Spacer(1,12),
-                Image("storey_shear_step.png", width=380, height=520)
-            ]
-
-            doc.build(content)
-            st.success("PDF generated successfully")
 
 # ==================================================
-# TAB 3 – MULTI-ZONE STUDY
+# TAB 3 – ABOUT
 # ==================================================
 with tab3:
-    st.subheader("Multi-Zone Base Shear Comparison")
-
-    zones = st.multiselect(
-        "Select Zones",
-        list(Z_TABLE.keys()),
-        default=["II","III","IV"]
+    st.info(
+        "This application demonstrates IS 1893:2025 Equivalent Static Method.\n\n"
+        "For educational use only.\n\n"
+        "Created by: Vrushali Kamalakar"
     )
-    TR_mz = st.selectbox("Return Period (years)", [75,175,275,475,975], key="TR_mz")
-
-    if st.button("Compute Multi-Zone Base Shear"):
-        rows = []
-        for z in zones:
-            Z = Z_TABLE[z][TR_mz]
-            Vx = Z * A_NH(0.5,"A/B") * 10000 / 5
-            Vy = Z * A_NH(0.7,"A/B") * 10000 / 5
-            rows.append([z, Z, Vx, Vy])
-
-        dfz = pd.DataFrame(rows, columns=["Zone","Z","Vx (kN)","Vy (kN)"])
-        st.dataframe(dfz.round(3), use_container_width=True)
-
-# ==================================================
-# FOOTER
-# ==================================================
-st.markdown("---")
-st.info(
-    "📘 For educational use only.\n"
-    "Independent verification is mandatory before professional application.\n\n"
-    "Created by: Vrushali Kamalakar"
-)
